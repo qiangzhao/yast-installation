@@ -13,8 +13,9 @@
 #
 # ------------------------------------------------------------------------------
 
-require "installation/updates_manager"
+require "installation/instsys_packages"
 require "installation/update_repositories_finder"
+require "installation/updates_manager"
 require "y2packager/self_update_addon_repo"
 require "uri"
 require "yaml"
@@ -113,6 +114,7 @@ module Yast
       updated = update_repositories.map { |u| add_repository(u) }.any?
 
       if updated
+        return false unless valid_repositories?
         # copy the addon packages before applying the updates to inst-sys,
         # #apply_all removes the repositories!
         Yast::Progress.NextStage
@@ -433,10 +435,34 @@ module Yast
   private
 
     #
-    # TODO: Most of the code responsable of process the profile has been
+    # TODO: Most of the code responsible of process the profile has been
     # obtained from which inst_autoinit client in yast2-autoinstallation.
     # We should try to move it to a independent class or to Yast::Profile.
     #
+
+    # Do the self-update repositories contain matching package versions?
+    # Patching the SP2 installer with old packages (SP1) or newer packages
+    # (SP3) can cause crashes or unexpected behavior.
+    def valid_repositories?
+      instsys_packages = Installation::InstsysPackages.read("/.packages.root")
+      verifier = Installation::SelfupdateVerifier.new(updates_manager.repositories, instsys_packages)
+
+      # no downgraded or too new packages => OK
+      return true if verifier.downgraded_packages.empty? && verifier.too_new_packages.empty?
+
+      if ENV["Y2_FORCE_SELF_UPDATE"] == "1"
+        log.warn("Self update forced by user despite of a package version mismatch!")
+        return true
+      else
+        repos = update_repositories.join("\n")
+        # TRANSLATORS: error message, %{repos} is replaced by an URL list
+        Report.Error(_("The installer found unexpected package versions in \n" \
+          "the installer update repository. Make sure that the self update\n" \
+          "URL points to the correct repository.\n\n" \
+          "Configured update repositories:\n%{repos}") % { repos: repos })
+        return false
+      end
+    end
 
     # @return [Boolean] true if the scheme is not forbidden
     def profile_valid_scheme?

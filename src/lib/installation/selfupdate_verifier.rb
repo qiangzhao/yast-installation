@@ -30,6 +30,7 @@ module Installation
     #
     # We can also check the "too new" packages because the YaST package versions
     # are bound to specific SP release (e.g. 4.1.x in SP1, 4.2.x in SP2).
+    # So the major and minor version parts must not be changed during self update.
     VERIFIED_PACKAGES = [
       "autoyast2-installation",
       "yast2",
@@ -41,8 +42,9 @@ module Installation
       "yast2-update"
     ].freeze
 
-    def initialize(repo_id, packages_file = "/.packages.root")
-      @instsys_packages = InstsysPackages.read(packages_file).select do |p|
+    # @param repositories [Array<UpdateRepository>] the self-update repositories
+    def initialize(repositories, instsys_packages)
+      @instsys_packages = instsys_packages.select do |p|
         VERIFIED_PACKAGES.include?(p.name)
       end
 
@@ -52,13 +54,15 @@ module Installation
       # group the same packages together
       packages = {}
 
-      Y2Packager::Repository.find(repo_id).packages.each do |p|
-        next unless VERIFIED_PACKAGES.include?(p.name)
+      repositories.each do |repo|
+        repo.packages.each do |p|
+          next unless VERIFIED_PACKAGES.include?(p.name)
 
-        if packages[p.name]
-          packages[p.name] << p
-        else
-          packages[p.name] = [p]
+          if packages[p.name]
+            packages[p.name] << p
+          else
+            packages[p.name] = [p]
+          end
         end
       end
 
@@ -70,10 +74,13 @@ module Installation
 
     # check for downgraded packages, e.g. using the SP1 updates in the SP2 installer
     def downgraded_packages
-      filter_self_updates do |inst_sys_pkg, update_pkg|
+      packages = filter_self_updates do |inst_sys_pkg, update_pkg|
         # -1 = "update_pkg" is older than "inst_sys_pkg" (0 = the same, 1 = newer)
         Yast::Pkg.CompareVersions(update_pkg.version, inst_sys_pkg.version) == -1
       end
+
+      log.warn("Found downgraded self-update packages: #{packages} ") unless packages.empty?
+      packages
     end
 
     # Check for too new packages, e.g. using the SP3 updates in the SP2 installer.
@@ -82,13 +89,16 @@ module Installation
     # a specific product version (e.g. 4.1.x in SP1, 4.2.x in SP2) and we always
     # bump only the patch version we can also possibly check for "too new" packages.
     def too_new_packages
-      filter_self_updates do |inst_sys_pkg, update_pkg|
+      packages = filter_self_updates do |inst_sys_pkg, update_pkg|
         inst_major, inst_minor = parse_version(inst_sys_pkg.version)
         update_major, update_minor = parse_version(update_pkg.version)
 
         # check major/minor version update
         update_major > inst_major || update_minor > inst_minor
       end
+
+      log.warn("Found too new self-update packages: #{packages} ") unless packages.empty?
+      packages
     end
 
   private

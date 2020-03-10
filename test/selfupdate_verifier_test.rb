@@ -13,29 +13,37 @@
 
 require_relative "test_helper"
 
+require "uri"
 require "installation/selfupdate_verifier"
+require "installation/update_repository"
+require "installation/instsys_packages"
+require "y2packager/resolvable"
+
+def create_package_resolvable(name, version)
+  Y2Packager::Resolvable.new("kind" => :package, "name" => name, "source" => nil,
+    "version" => version, "arch" => "x86_64", "deps" => [])
+end
 
 describe Installation::SelfupdateVerifier do
   let(:test_file) { File.join(FIXTURES_DIR, "inst-sys", "packages.root") }
-  let(:repo_id) { 42 }
   let(:repo) do
-    Y2Packager::Repository.new(repo_id: repo_id, repo_alias: "alias",
-    name: "name", url: "http://example.com", enabled: true, autorefresh: true)
+    Installation::UpdateRepository.new(URI("http://example.com"))
   end
 
   # this one is downgraded
-  let(:downgraded_pkg) { Y2Packager::Package.new("yast2", repo_id, "4.1.7-1.2") }
+  let(:downgraded_pkg) { create_package_resolvable("yast2", "4.1.7-1.2") }
   # downgraded non-YaST package
-  let(:downgraded_nony2_pkg) { Y2Packager::Package.new("rpm", repo_id, "3.1.2-1.2") }
+  let(:downgraded_nony2_pkg) { create_package_resolvable("rpm", "3.1.2-1.2") }
   # this one is upgraded a bit
-  let(:upgraded_pkg) { Y2Packager::Package.new("yast2-installation", repo_id, "4.2.37-1.1") }
+  let(:upgraded_pkg) { create_package_resolvable("yast2-installation", "4.2.37-1.1") }
   # this one is upgraded too much
-  let(:too_new) { Y2Packager::Package.new("yast2-packager", repo_id, "4.3.11-1.3") }
+  let(:too_new) { create_package_resolvable("yast2-packager", "4.3.11-1.3") }
 
-  subject { Installation::SelfupdateVerifier.new(repo_id, test_file) }
+  let(:instsys_packages) { Installation::InstsysPackages.read(test_file) }
+
+  subject { Installation::SelfupdateVerifier.new([repo], instsys_packages) }
 
   before do
-    expect(Y2Packager::Repository).to receive(:find).with(repo_id).and_return(repo)
     expect(repo).to receive(:packages).and_return(
       [downgraded_pkg, upgraded_pkg, too_new, downgraded_nony2_pkg]
     )
